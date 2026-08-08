@@ -1,0 +1,88 @@
+# wasmcart-android-lua
+
+A **native** runtime for wasmcart Lua carts. Same `.wasc` files, same engine
+sources as [wasmcart-lua](../wasmcart-lua) — compiled with clang/NDK instead
+of interpreted as wasm under V8.
+
+Built for sideloaded Android game APKs: the V8-based
+[wasmcart-android](../wasmcart-android) player ships ~67 MB per game because
+libnode is ~60 MB of it, and a card game never executes a line of JavaScript.
+Dropping the wasm layer takes the engine to **0.5 MB stripped**.
+
+This repo does NOT replace wasmcart-android. That stays the universal
+any-cart player (mruby, QuickJS, Godot, anything). This is the Lua-only
+fast path.
+
+## Status
+
+**M1 complete — the engine runs natively.** Spades boots, deals, bids, and
+plays tricks in an SDL window on macOS through the engine's GL2D renderer,
+with card art, fonts, animation, bot AI, and input all working. Next up is
+M2 (the same thing on an Android device). Plan and milestones:
+[`internal-wasmcart/PLAN.md`](../internal-wasmcart/PLAN.md).
+
+## Try it (macOS)
+
+```sh
+./tools/build-native-macos.sh                     # fetches Lua, builds engine
+./build-native/wasmcart-lua-native game.wasc      # play it
+./build-native/wasmcart-lua-native game.wasc --frames 900 --drive 90 \
+    --shot out.ppm                                # headless, scripted, screenshot
+```
+
+Flags: `--frames N` (exit after N), `--shot FILE` (PPM screenshot, fixed
+60 Hz step for reproducible goldens), `--drive N` (synthesize an A press
+every N frames), `--scale S` (shrink the window).
+
+`WITH_PHYSICS=1` builds Box2D in. Default is off — see
+`native/physics_stub.c` for why (the engine's `physics.c` calls a Box2D API
+that exists in no released upstream tag).
+
+## How it works
+
+A `.wasc` is a zip: `manifest.json`, `main.wasm`, and the asset tree. The
+wasm hosts execute `main.wasm`; this runtime **ignores it** and serves the
+asset tree to the engine it already contains. That is what keeps one
+artifact shipping to every platform.
+
+```
+game.wasc ──(assets)──> native engine (runtime.c, render2d_gl.c, Lua 5.4.7)
+                            │  direct GLES3 / GL — no marshaling shim
+                        native host (wc_host_native.c) ──> SDL2
+```
+
+Three things make this cheap rather than a rewrite:
+
+- **`wasmcart.h` was already dual-target.** Every `wc_*` host import is
+  `#ifdef __wasm__` with a non-wasm branch, and `_GL_IMPORT` expands to
+  nothing off-wasm — so the engine's GL calls become ordinary extern
+  declarations that link against real GL. No shim layer exists to have bugs.
+- **The engine is plain C99.** Lua compiled clean on the first try; the
+  engine needed no source changes beyond the pointer-width seam below.
+- **`-sSUPPORT_LONGJMP=wasm` was the reason V8 was required** (Lua's error
+  handling is setjmp/longjmp, which needs wasm exception handling). Native
+  longjmp just works — the whole constraint disappears.
+
+## The one real ABI seam
+
+`wc_info_t` hands the host every shared region (framebuffer, audio ring,
+pads, pointers, save) as a **`uint32_t` offset into wasm linear memory**.
+Exact under wasm; lossy on 64-bit native. Same for the debug descriptor.
+
+Upstream (guarded, `WC_NATIVE_HOST`, wasm bytes unchanged):
+
+- `wasmcart-lua/runtime/wc_native.h` — `wc_native_regions()` returns the real
+  addresses. The regions are `static` inside the engine, so it hands them out
+  once instead of the host reconstructing them from offsets.
+- `wasmcart.h` — each host-import block gained an `#elif defined(WC_NATIVE_HOST)`
+  branch declaring the imports `extern` (the plain non-wasm branch is
+  no-op stubs, which a native host must not get).
+- `wasmcart/include/wc_cart.h` — a native debug descriptor holding real
+  pointers, because `(uint32_t)(uintptr_t)&x` is neither lossless nor a
+  compile-time constant on a 64-bit target.
+
+## macOS-only glue
+
+`tools/gles_shim.c` rewrites the engine's `#version 300 es` shaders to
+`#version 330 core` on the way into `glShaderSource`. Android links real
+GLES3, where the shaders compile verbatim — this file is not in that build.
