@@ -316,7 +316,18 @@ int main(int argc, char *argv[]) {
         }
         if (steps == MAX_STEPS) acc = 0.0;   /* dropped time, don't spiral */
 
-        if (steps > 0) SDL_GL_SwapWindow(win);
+        if (steps > 0) {
+            SDL_GL_SwapWindow(win);
+            /* Frame rate, once a second. Cheap, and the only honest way to
+             * compare this runtime against the V8 player rather than trading
+             * impressions about which "feels" smoother. */
+            static Uint64 fps_t0; static uint32_t fps_f0;
+            if (!fps_t0) { fps_t0 = now; fps_f0 = frame; }
+            else if (now - fps_t0 >= freq) {
+                LOGI("fps %.1f", (double)(frame - fps_f0) * (double)freq / (double)(now - fps_t0));
+                fps_t0 = now; fps_f0 = frame;
+            }
+        }
         else SDL_Delay(1);
 
         if (frame % SAVE_EVERY == 0) save_persist(R);
