@@ -18,6 +18,7 @@
 #include "wc_host_native.h"
 #include "wasmcart.h"
 #include "wc_native.h"
+#include "wc_shell.h"
 
 extern wc_info_t *wc_get_info(void);
 extern void wc_init(void);
@@ -34,7 +35,9 @@ extern int  wcl_r2d_active(void);
 #define SAVE_EVERY   600            /* frames between save checks (~10 s) */
 
 static wc_zip *g_zip;
-static char    g_save_path[1024];
+static wc_save_state_t  g_save;
+static wc_audio_state_t g_audio_st;
+static SDL_AudioDeviceID g_audio;
 
 /* ── host callbacks ─────────────────────────────────────────────────── */
 
@@ -68,36 +71,6 @@ static void pad_rumble_stop_cb(unsigned int pad_id) {
     if (c) SDL_GameControllerRumble(c, 0, 0, 0);
 }
 
-/* ── saves ──────────────────────────────────────────────────────────── */
-
-static void save_path_init(const char *dir, const char *cart) {
-    const char *base = strrchr(cart, '/');
-    base = base ? base + 1 : cart;
-    snprintf(g_save_path, sizeof(g_save_path), "%s/%s.sav", dir, base);
-}
-
-static void save_load(const wc_native_regions_t *R) {
-    if (!g_save_path[0]) return;
-    FILE *f = fopen(g_save_path, "rb");
-    if (!f) return;
-    size_t n = fread(R->save, 1, R->save_size, f);
-    fclose(f);
-    LOGI("save: restored %zu bytes", n);
-}
-
-static void save_persist(const wc_native_regions_t *R) {
-    static unsigned char *last;
-    static int have_last;
-    if (!g_save_path[0]) return;
-    if (have_last && memcmp(last, R->save, R->save_size) == 0) return;  /* unchanged */
-    FILE *f = fopen(g_save_path, "wb");
-    if (!f) return;
-    fwrite(R->save, 1, R->save_size, f);
-    fclose(f);
-    if (!last) last = (unsigned char *)malloc(R->save_size);
-    if (last) { memcpy(last, R->save, R->save_size); have_last = 1; }
-}
-
 /* ── letterbox ──────────────────────────────────────────────────────── */
 
 typedef struct { int x, y, w, h; } rect_t;
@@ -110,30 +83,6 @@ static rect_t fit_rect(int sw, int sh, int dw, int dh) {
     r.x = (dw - r.w) / 2;
     r.y = (dh - r.h) / 2;
     return r;
-}
-
-/* ── audio ──────────────────────────────────────────────────────────── */
-
-static SDL_AudioDeviceID g_audio;
-static uint32_t g_audio_read;
-
-static void audio_drain(const wc_native_regions_t *R) {
-    if (!g_audio) return;
-    uint32_t w = *R->audio_write_cursor, cap = R->audio_cap;
-    if (w == g_audio_read) return;
-    uint32_t avail = (w >= g_audio_read) ? (w - g_audio_read)
-                                         : (cap - g_audio_read + w);
-    if (!avail) return;
-    /* interleaved stereo f32; the ring wraps, so queue it in up to two runs */
-    for (uint32_t i = 0; i < avail; ) {
-        uint32_t idx = (g_audio_read + i) % cap;
-        uint32_t run = cap - idx;
-        if (run > avail - i) run = avail - i;
-        SDL_QueueAudio(g_audio, R->audio_ring + (size_t)idx * 2,
-                       run * 2 * sizeof(float));
-        i += run;
-    }
-    g_audio_read = w;
 }
 
 /* ── main ───────────────────────────────────────────────────────────── */
@@ -192,7 +141,11 @@ int main(int argc, char *argv[]) {
     const wc_native_regions_t *R = wc_native_regions();
 
     /* prior save must be in memory before wc_init reads it */
-    if (saves_dir) { save_path_init(saves_dir, cart_path); save_load(R); }
+    if (saves_dir) {
+        wc_save_init(&g_save, saves_dir, cart_path);
+        int n = wc_save_load(&g_save, R);
+        if (n > 0) LOGI("save: restored %d bytes", n);
+    }
 
     R->host_info->preferred_width   = (uint32_t)win_w;
     R->host_info->preferred_height  = (uint32_t)win_h;
@@ -204,14 +157,8 @@ int main(int argc, char *argv[]) {
     int cw = (int)info->width, ch = (int)info->height;
     LOGI("cart %dx%d", cw, ch);
 
-    SDL_AudioSpec want, got;
-    SDL_zero(want);
-    want.freq = 48000;
-    want.format = AUDIO_F32SYS;
-    want.channels = 2;
-    want.samples = 1024;
-    g_audio = SDL_OpenAudioDevice(NULL, 0, &want, &got, 0);
-    if (g_audio) SDL_PauseAudioDevice(g_audio, 0);
+    g_audio = wc_audio_open();
+    if (g_audio) { wc_audio_reset(&g_audio_st); SDL_PauseAudioDevice(g_audio, 0); }
     else LOGE("audio: %s", SDL_GetError());
 
     /* The engine renders straight to the default framebuffer in CART
@@ -233,7 +180,7 @@ int main(int argc, char *argv[]) {
         while (SDL_PollEvent(&ev)) {
             switch (ev.type) {
             case SDL_QUIT: running = 0; break;
-            case SDL_APP_WILLENTERBACKGROUND: suspended = 1; save_persist(R); break;
+            case SDL_APP_WILLENTERBACKGROUND: suspended = 1; wc_save_persist(&g_save, R); break;
             case SDL_APP_DIDENTERFOREGROUND:  suspended = 0; prev = SDL_GetPerformanceCounter(); break;
             case SDL_WINDOWEVENT:
                 if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
@@ -310,7 +257,7 @@ int main(int argc, char *argv[]) {
 
             glViewport(vp.x, vp.y, vp.w, vp.h);
             wc_render();
-            audio_drain(R);
+            wc_audio_drain(&g_audio_st, g_audio, R);
 
             frame++; steps++; acc -= STEP_MS;
         }
@@ -330,10 +277,10 @@ int main(int argc, char *argv[]) {
         }
         else SDL_Delay(1);
 
-        if (frame % SAVE_EVERY == 0) save_persist(R);
+        if (frame % SAVE_EVERY == 0) wc_save_persist(&g_save, R);
     }
 
-    save_persist(R);
+    wc_save_persist(&g_save, R);
     if (g_audio) SDL_CloseAudioDevice(g_audio);
     wc_zip_close(g_zip);
     SDL_GL_DeleteContext(glc);

@@ -90,7 +90,7 @@ fi
 $CC $COMMON_FLAGS \
   "$RT/runtime.c" "$RT/vorbis.c" "$RT/cartconf.c" "$PHYS_SRC" \
   "$RT/render2d_gl.c" \
-  native/wc_host_native.c native/zip_assets.c \
+  native/wc_host_native.c native/zip_assets.c native/wc_shell.c \
   tools/desktop_main.c tools/gles_shim.c \
   "$VENDOR/liblua54.a" $PHYS_LIB \
   -DWCL_USE_GL -DWCL_ENABLE_GL2D -DWC_USE_NET_PEER \

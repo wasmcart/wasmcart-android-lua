@@ -22,6 +22,7 @@
  * wc_* structs here, not the GL block. */
 #include "wasmcart.h"
 #include "wc_native.h"
+#include "wc_shell.h"
 
 /* engine entry points (runtime.c) */
 extern wc_info_t *wc_get_info(void);
@@ -133,13 +134,14 @@ static void write_ppm(const char *path, const unsigned char *rgba, int w, int h)
 }
 
 int main(int argc, char **argv) {
-    const char *cart = NULL, *shot = NULL;
+    const char *cart = NULL, *shot = NULL, *saves = NULL;
     int want_frames = 0, scale = 1, drive = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--frames") && i + 1 < argc) want_frames = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--scale") && i + 1 < argc) scale = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--drive") && i + 1 < argc) drive = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--saves") && i + 1 < argc) saves = argv[++i];
         else if (argv[i][0] != '-') cart = argv[i];
     }
     if (!cart) { fprintf(stderr, "usage: %s game.wasc [--frames N --shot out.ppm]\n", argv[0]); return 1; }
@@ -187,6 +189,19 @@ int main(int argc, char **argv) {
     R->host_info->preferred_height = (uint32_t)ch;
     R->host_info->audio_sample_rate = 48000;
 
+    /* prior save must be in memory before wc_init reads it */
+    static wc_save_state_t save_st;
+    if (saves) {
+        wc_save_init(&save_st, saves, cart);
+        int n = wc_save_load(&save_st, R);
+        if (n > 0) fprintf(stderr, "save: restored %d bytes\n", n);
+    }
+
+    static wc_audio_state_t audio_st;
+    SDL_AudioDeviceID audio = wc_audio_open();
+    if (audio) { wc_audio_reset(&audio_st); SDL_PauseAudioDevice(audio, 0); }
+    else fprintf(stderr, "audio: %s\n", SDL_GetError());
+
     wc_set_seed((unsigned)SDL_GetPerformanceCounter());
     wc_init();
 
@@ -198,6 +213,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "cart: %dx%d\n", cw, ch);
 
     int running = 1, frame = 0;
+    long total_audio = 0;
     double t_ms = 0.0;
     const double STEP_MS = 1000.0 / 60.0;
     Uint64 prev = SDL_GetPerformanceCounter();
@@ -238,6 +254,7 @@ int main(int argc, char **argv) {
         R->time->frame    = (uint32_t)frame;
 
         wc_render();
+        total_audio += wc_audio_drain(&audio_st, audio, R);
         /* If the engine fell back to its software rasterizer it has written
          * wc_framebuffer and presented nothing (wc_gl_blit is suppressed when
          * GL never came up). Present it ourselves so the CPU path is visible
@@ -260,6 +277,14 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (saves) {
+        int wrote = wc_save_persist(&save_st, R);
+        fprintf(stderr, "save: %s (%s)\n", wrote > 0 ? "written" : "unchanged", save_st.path);
+    }
+    fprintf(stderr, "audio: %ld frames queued (%.2f s), %u dropped (%.2f s)\n",
+            total_audio, (double)total_audio / 48000.0,
+            audio_st.dropped, (double)audio_st.dropped / 48000.0);
+    if (audio) SDL_CloseAudioDevice(audio);
     SDL_GL_DeleteContext(gl);
     SDL_DestroyWindow(win);
     SDL_Quit();

@@ -64,6 +64,7 @@ add_library(main SHARED
     android_main.c
     wc_host_native.c
     zip_assets.c
+    wc_shell.c
     physics_stub.c          # see the file: no released Box2D has physics.c's API
     "${RT}/runtime.c"
     "${RT}/vorbis.c"
