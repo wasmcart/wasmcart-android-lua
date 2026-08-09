@@ -169,6 +169,7 @@ int main(int argc, char *argv[]) {
      * the engine to restore a host rect instead. No card game does. */
     rect_t vp = fit_rect(cw, ch, win_w, win_h);
 
+    long g_audio_frames = 0;
     int running = 1, suspended = 0;
     uint32_t frame = 0;
     double t_ms = 0.0, acc = 0.0;
@@ -257,7 +258,7 @@ int main(int argc, char *argv[]) {
 
             glViewport(vp.x, vp.y, vp.w, vp.h);
             wc_render();
-            wc_audio_drain(&g_audio_st, g_audio, R);
+            g_audio_frames += wc_audio_drain(&g_audio_st, g_audio, R);
 
             frame++; steps++; acc -= STEP_MS;
         }
@@ -271,7 +272,9 @@ int main(int argc, char *argv[]) {
             static Uint64 fps_t0; static uint32_t fps_f0;
             if (!fps_t0) { fps_t0 = now; fps_f0 = frame; }
             else if (now - fps_t0 >= freq) {
-                LOGI("fps %.1f", (double)(frame - fps_f0) * (double)freq / (double)(now - fps_t0));
+                LOGI("fps %.1f | audio %.2fs queued, %u dropped",
+                     (double)(frame - fps_f0) * (double)freq / (double)(now - fps_t0),
+                     (double)g_audio_frames / 48000.0, g_audio_st.dropped);
                 fps_t0 = now; fps_f0 = frame;
             }
         }
