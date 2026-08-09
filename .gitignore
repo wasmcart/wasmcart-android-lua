@@ -2,3 +2,15 @@
 /deps/SDL/
 /out/
 *.ppm
+/deps/lua/
+/app/src/main/assets/cart.wasc
+/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
+/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
+/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png
+/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png
+/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
+/.gradle/
+/build/
+/app/build/
+/app/.cxx/
+/local.properties
