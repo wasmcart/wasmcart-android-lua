@@ -39,6 +39,10 @@ def cartVersionCode = vparts.find() \
 if (cartVersionCode < 1) cartVersionCode = 1
 // icon background color, overridable per game: -PiconBg=#RRGGBB
 def iconBg = (project.findProperty('iconBg') ?: '#0E5C29').toString()
+// Identity of the produced app. Default takes over the V8 app's id (M6);
+// override to install beside it instead.
+def appIdPrefix = (project.findProperty('appIdPrefix') ?: 'dev.wasmcart.player.').toString()
+def NATIVE_EPOCH = 1000000
 
 android {
     namespace 'dev.wasmcart.player'
@@ -46,10 +50,20 @@ android {
     ndkVersion '27.2.12479018'
 
     defaultConfig {
-        applicationId 'dev.wasmcart.lua.' + cartSlug
+        // SWITCHOVER (M6): the native build of a game takes over the V8
+        // build's identity, so it installs as an UPGRADE rather than as a
+        // second copy of the same game. Both templates are debug-signed with
+        // the same keystore, which is what makes that legal.
+        // For side-by-side A/B testing, build with:
+        //   ./gradlew assembleDebug -PappIdPrefix=dev.wasmcart.lua.
+        applicationId appIdPrefix + cartSlug
         minSdk 24          // no libnode here; SDL2 + GLES3 is the real floor
         targetSdk 36
-        versionCode cartVersionCode
+        // Native builds must outrank any V8 build of the SAME cart version or
+        // Android refuses the in-place upgrade. versionCode exists precisely
+        // for this kind of ordering; versionName still shows the cart's own
+        // version, which is what a human should see.
+        versionCode cartVersionCode + NATIVE_EPOCH
         versionName cartVersion
         resValue 'string', 'app_name', cartName
         resValue 'color', 'ic_launcher_background', iconBg
