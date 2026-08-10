@@ -135,13 +135,16 @@ static void write_ppm(const char *path, const unsigned char *rgba, int w, int h)
 
 int main(int argc, char **argv) {
     const char *cart = NULL, *shot = NULL, *saves = NULL;
-    int want_frames = 0, scale = 1, drive = 0;
+    int want_frames = 0, scale = 1, drive = 0, headless = 0;
+    unsigned seed = 0; int have_seed = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--frames") && i + 1 < argc) want_frames = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--scale") && i + 1 < argc) scale = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--drive") && i + 1 < argc) drive = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--saves") && i + 1 < argc) saves = argv[++i];
+        else if (!strcmp(argv[i], "--seed") && i + 1 < argc) { seed = (unsigned)strtoul(argv[++i], NULL, 10); have_seed = 1; }
+        else if (!strcmp(argv[i], "--headless")) headless = 1;
         else if (argv[i][0] != '-') cart = argv[i];
     }
     if (!cart) { fprintf(stderr, "usage: %s game.wasc [--frames N --shot out.ppm]\n", argv[0]); return 1; }
@@ -177,7 +180,14 @@ int main(int argc, char **argv) {
 
     SDL_Window *win = SDL_CreateWindow("wasmcart-lua (native)",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        cw / scale, ch / scale, SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI);
+        cw / scale, ch / scale, SDL_WINDOW_OPENGL |
+        /* HiDPI gives a 2x drawable on Retina, which is lovely to look at and
+         * useless for parity: the wasm side renders at cart size. Headless
+         * runs stay 1:1 so frames are directly comparable. */
+        /* NOT SDL_WINDOW_HIDDEN: on macOS a hidden window's GL surface is
+         * not reliably sized, and the readback comes back offset. A visible
+         * 1:1 window is the price of a trustworthy comparison. */
+        (headless ? 0 : SDL_WINDOW_ALLOW_HIGHDPI));
     if (!win) { fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError()); return 1; }
     SDL_GLContext gl = SDL_GL_CreateContext(win);
     if (!gl) { fprintf(stderr, "SDL_GL_CreateContext: %s\n", SDL_GetError()); return 1; }
@@ -202,7 +212,7 @@ int main(int argc, char **argv) {
     if (audio) { wc_audio_reset(&audio_st); SDL_PauseAudioDevice(audio, 0); }
     else fprintf(stderr, "audio: %s\n", SDL_GetError());
 
-    wc_set_seed((unsigned)SDL_GetPerformanceCounter());
+    wc_set_seed(have_seed ? seed : (unsigned)SDL_GetPerformanceCounter());
     wc_init();
 
     /* conf.lua may have resized the cart — re-read and resize the window */
@@ -211,6 +221,42 @@ int main(int argc, char **argv) {
         SDL_SetWindowSize(win, cw / scale, ch / scale);
     }
     fprintf(stderr, "cart: %dx%d\n", cw, ch);
+
+    /* Headless parity runs must not depend on the window the display is
+     * willing to give us: a 1920x1080 request on a smaller screen gets
+     * clamped, and the readback then holds a smaller viewport with the rest
+     * of the frame stale. Render into a cart-sized FBO instead.
+     * (Safe for these carts: the engine only re-binds FBO 0 when returning
+     * from a canvas, which none of them use.) */
+    GLuint hl_fbo = 0, hl_tex = 0;
+    if (headless) {
+        /* The engine CACHES its GL bindings (render2d_gl.c keeps
+         * `bound_texture` and skips a redundant glBindTexture). Creating our
+         * own texture here silently invalidates that cache: the engine then
+         * believes the atlas is bound while OUR texture actually is, and its
+         * next glTexSubImage2D uploads the sprite into our FBO texture. The
+         * atlas stays empty and sprites never appear -- with no GL error.
+         *
+         * So: capture what is bound now (the engine's atlas), do our work,
+         * and put it back. Same law the Android host learned the hard way --
+         * a shell must leave every piece of GL state exactly as it found it. */
+        GLint engine_tex = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &engine_tex);
+
+        glGenTextures(1, &hl_tex);
+        glBindTexture(GL_TEXTURE_2D, hl_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cw, ch, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glGenFramebuffers(1, &hl_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, hl_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hl_tex, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            fprintf(stderr, "headless FBO incomplete\n");
+        glViewport(0, 0, cw, ch);
+
+        glBindTexture(GL_TEXTURE_2D, (GLuint)engine_tex);   /* restore */
+    }
 
     int running = 1, frame = 0;
     long total_audio = 0;
@@ -246,13 +292,14 @@ int main(int argc, char **argv) {
         Uint64 now = SDL_GetPerformanceCounter();
         double dt = (double)(now - prev) * 1000.0 / (double)freq;
         prev = now;
-        if (shot) dt = STEP_MS;               /* deterministic for goldens */
+        if (shot || have_seed) dt = STEP_MS;  /* deterministic for goldens */
         if (dt > 250.0) dt = 250.0;           /* the ABI's stall clamp */
         t_ms += dt;
         R->time->time_ms  = t_ms;
         R->time->delta_ms = dt;
         R->time->frame    = (uint32_t)frame;
 
+        if (headless) { glBindFramebuffer(GL_FRAMEBUFFER, hl_fbo); glViewport(0, 0, cw, ch); }
         wc_render();
         total_audio += wc_audio_drain(&audio_st, audio, R);
         /* If the engine fell back to its software rasterizer it has written
@@ -266,7 +313,8 @@ int main(int argc, char **argv) {
         if (want_frames && frame >= want_frames) {
             if (shot) {
                 int pw, ph;
-                SDL_GL_GetDrawableSize(win, &pw, &ph);
+                if (headless) { pw = cw; ph = ch; glBindFramebuffer(GL_FRAMEBUFFER, hl_fbo); }
+                else SDL_GL_GetDrawableSize(win, &pw, &ph);
                 unsigned char *px = (unsigned char *)malloc((size_t)pw * ph * 4);
                 glReadPixels(0, 0, pw, ph, GL_RGBA, GL_UNSIGNED_BYTE, px);
                 write_ppm(shot, px, pw, ph);

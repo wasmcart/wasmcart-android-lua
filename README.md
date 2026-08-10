@@ -34,6 +34,22 @@ Flags: `--frames N` (exit after N), `--shot FILE` (PPM screenshot, fixed
 60 Hz step for reproducible goldens), `--drive N` (synthesize an A press
 every N frames), `--scale S` (shrink the window).
 
+## Parity
+
+```sh
+./tools/parity.sh          # one command, run it at every wasmcart-lua bump
+```
+
+Builds a wasm engine and a native engine from the SAME sources with the same
+feature set, packs each game against the wasm one, then drives both through
+identical scripted input (same seed, same fixed 60 Hz step) and compares the
+frames. Today all four dad games come out **bit-exact: 0.000% of pixels
+differ, max delta 0, over 300 frames.**
+
+Comparing against whatever engine a cart happens to be packed with would make
+every difference ambiguous — engine drift, or port bug? Building both sides
+from one source removes that question.
+
 `WITH_PHYSICS=1` builds Box2D in. Default is off — see
 `native/physics_stub.c` for why (the engine's `physics.c` calls a Box2D API
 that exists in no released upstream tag).

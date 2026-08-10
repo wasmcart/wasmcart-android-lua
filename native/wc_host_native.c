@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdlib.h>
 
 static wc_host_cfg_t g_cfg;
 
@@ -37,13 +38,20 @@ void wc_frame_yield(void) {}
  */
 int wc_asset_size(const char *name, unsigned int name_len) {
     if (!g_cfg.asset_size) return -1;
-    return g_cfg.asset_size(g_cfg.asset_ctx, name, name_len);
+    int r = g_cfg.asset_size(g_cfg.asset_ctx, name, name_len);
+    if (getenv("WC_TRACE_ASSETS"))
+        fprintf(stderr, "[asset] size %.*s -> %d\n", (int)name_len, name, r);
+    return r;
 }
 
 int wc_load_asset(const char *name, unsigned int name_len,
                   void *buf, unsigned int buf_len) {
     if (!g_cfg.asset_read) return -1;
-    return g_cfg.asset_read(g_cfg.asset_ctx, name, name_len, buf, buf_len);
+    int r = g_cfg.asset_read(g_cfg.asset_ctx, name, name_len, buf, buf_len);
+    if (getenv("WC_TRACE_ASSETS"))
+        fprintf(stderr, "[asset] read %.*s (cap %u) -> %d\n",
+                (int)name_len, name, buf_len, r);
+    return r;
 }
 
 /* ── pads ────────────────────────────────────────────────────────────
