@@ -15,10 +15,19 @@ fast path.
 
 ## Status
 
-**M1 complete — the engine runs natively.** Spades boots, deals, bids, and
-plays tricks in an SDL window on macOS through the engine's GL2D renderer,
-with card art, fonts, animation, bot AI, and input all working. Next up is
-M2 (the same thing on an Android device). Plan and milestones:
+**Done — shipping on the phone.** All four dad games run on this runtime,
+installed over the V8 builds. Measured against those builds, same cart:
+
+| | V8 | native |
+|---|---|---|
+| APK | 64.2 MB | **6.4 MB** |
+| CPU | 60.0% | **36.6%** |
+| RAM | 350 MB | **277 MB** |
+| frame rate | — | locked 60 fps |
+| cold boot | 181 ms | 174 ms (no real change) |
+
+Rendering is **bit-exact** against the wasm engine on all four games — see
+Parity below. Plan and milestone history:
 [`internal-wasmcart/PLAN.md`](../internal-wasmcart/PLAN.md).
 
 ## Try it (macOS)
