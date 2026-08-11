@@ -48,6 +48,11 @@ fi
 # optional per-game icon background: icon-bg.txt next to the cart holds
 # a #RRGGBB line (default: the family felt green)
 GRADLE_ARGS=()
+# WC_ABI overrides the native ABI, for running on an EMULATOR (x86_64 on a
+# desktop) rather than a phone. Ships as arm64 when unset.
+if [ -n "${WC_ABI:-}" ]; then
+    GRADLE_ARGS+=("-PwcAbi=$WC_ABI")
+fi
 if [ -f "$(dirname "$CART")/icon-bg.txt" ]; then
     GRADLE_ARGS+=("-PiconBg=$(head -1 "$(dirname "$CART")/icon-bg.txt" | tr -d '[:space:]')")
 fi
