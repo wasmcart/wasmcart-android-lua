@@ -53,6 +53,19 @@ GRADLE_ARGS=()
 if [ -n "${WC_ABI:-}" ]; then
     GRADLE_ARGS+=("-PwcAbi=$WC_ABI")
 fi
+# WC_ENGINE_REPO builds against a wasmcart-lua WORKING TREE rather than the
+# pinned submodule -- what you want while changing the engine and a cart
+# together, since otherwise the APK ships the pinned engine and the fix
+# under test never reaches the device.
+if [ -n "${WC_ENGINE_REPO:-}" ]; then
+    GRADLE_ARGS+=("-PengineRepo=$WC_ENGINE_REPO")
+fi
+# WC_PHYSICS=ON builds Box2D + Box3D in. A cart that calls b2/b3 gets
+# nothing at all without them, and they are the biggest thing in the
+# binary, so this is opt-in rather than always-on.
+if [ -n "${WC_PHYSICS:-}" ]; then
+    GRADLE_ARGS+=("-PwithPhysics=$WC_PHYSICS")
+fi
 if [ -f "$(dirname "$CART")/icon-bg.txt" ]; then
     GRADLE_ARGS+=("-PiconBg=$(head -1 "$(dirname "$CART")/icon-bg.txt" | tr -d '[:space:]')")
 fi

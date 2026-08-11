@@ -83,7 +83,21 @@ android {
         }
         externalNativeBuild {
             cmake {
-                arguments '-DANDROID_PLATFORM=android-24'
+                // -PengineRepo=/path/to/wasmcart-lua builds against a
+                // working tree instead of the pinned submodule. Needed
+                // whenever the engine is being changed alongside a cart:
+                // without it the APK silently ships the pinned engine and a
+                // fix under test never reaches the device.
+                // -PwithPhysics=ON builds Box2D + Box3D in. OFF by default
+                // because they are the largest thing in the binary and no
+                // card game touches physics -- but a cart that DOES use b2/b3
+                // renders nothing without them, so a physics game must ask.
+                def engineRepo = project.findProperty('engineRepo')
+                def withPhysics = (project.findProperty('withPhysics') ?: 'OFF').toString()
+                def cmakeArgs = ['-DANDROID_PLATFORM=android-24',
+                                 "-DWITH_PHYSICS=${withPhysics}"]
+                if (engineRepo) cmakeArgs += "-DENGINE_REPO=${engineRepo}"
+                arguments(*cmakeArgs)
                 // SDL2 is EXCLUDE_FROM_ALL in CMake; name it so AGP builds
                 // and packages it alongside libmain.so
                 targets 'main', 'SDL2'
