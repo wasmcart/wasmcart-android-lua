@@ -1,0 +1,6 @@
+[submodule "deps/wasmcart-lua"]
+	path = deps/wasmcart-lua
+	url = https://github.com/wasmcart/wasmcart-lua
+[submodule "deps/wasmcart"]
+	path = deps/wasmcart
+	url = https://github.com/wasmcart/wasmcart.git

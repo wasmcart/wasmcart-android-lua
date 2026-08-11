@@ -6,8 +6,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HERE="$(pwd)"
-ENGINE="${ENGINE_REPO:-$HERE/../wasmcart-lua}"
-WASMCART="${WASMCART_REPO:-$HERE/../wasmcart}"
+ENGINE="${ENGINE_REPO:-$HERE/deps/wasmcart-lua}"
+[ -d "$ENGINE/runtime" ] || ENGINE="$HERE/../wasmcart-lua"
+WASMCART="${WASMCART_REPO:-$HERE/deps/wasmcart}"
+[ -d "$WASMCART/include" ] || WASMCART="$HERE/../wasmcart"
 RT="$ENGINE/runtime"
 OUT="$HERE/build-parity"
 EMSDK="${EMSDK_ROOT:-$HOME/code/audio/emsdk}"

@@ -17,7 +17,11 @@ endif()
 set(RT "${ENGINE_REPO}/runtime")
 
 if(NOT DEFINED WASMCART_REPO)
-    set(WASMCART_REPO "${CMAKE_CURRENT_SOURCE_DIR}/../../wasmcart")
+    if(EXISTS "${DEPS}/wasmcart/include/wc_cart.h")
+        set(WASMCART_REPO "${DEPS}/wasmcart")          # pinned submodule
+    else()
+        set(WASMCART_REPO "${CMAKE_CURRENT_SOURCE_DIR}/../../wasmcart")
+    endif()
 endif()
 
 if(NOT EXISTS "${RT}/runtime.c")

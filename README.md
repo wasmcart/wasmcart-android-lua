@@ -33,6 +33,8 @@ Parity below. Plan and milestone history:
 ## Try it (macOS)
 
 ```sh
+git submodule update --init                       # wasmcart-lua + wasmcart, pinned
+./deps/fetch-deps.sh                              # SDL2 + Lua (Android build)
 ./tools/build-native-macos.sh                     # fetches Lua, builds engine
 ./build-native/wasmcart-lua-native game.wasc      # play it
 ./build-native/wasmcart-lua-native game.wasc --frames 900 --drive 90 \

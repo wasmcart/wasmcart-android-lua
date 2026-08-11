@@ -7,8 +7,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 HERE="$(pwd)"
 
-ENGINE="${ENGINE_REPO:-$HERE/../wasmcart-lua}"
-WASMCART="${WASMCART_REPO:-$HERE/../wasmcart}"
+# Pinned submodules first, sibling checkouts as a developer convenience.
+# A fresh clone must build with nothing but `git submodule update --init`.
+ENGINE="${ENGINE_REPO:-$HERE/deps/wasmcart-lua}"
+[ -d "$ENGINE/runtime" ] || ENGINE="$HERE/../wasmcart-lua"
+WASMCART="${WASMCART_REPO:-$HERE/deps/wasmcart}"
+[ -d "$WASMCART/include" ] || WASMCART="$HERE/../wasmcart"
 RT="$ENGINE/runtime"
 OUT="$HERE/build-native"
 VENDOR="$OUT/vendor"

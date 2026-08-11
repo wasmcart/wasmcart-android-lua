@@ -5,12 +5,14 @@
  * touch physics — every card game — do not need it, and leaving Box2D out
  * takes a meaningful bite out of the APK.
  *
- * Note for whoever re-enables it: physics.c calls b2Body_SetMotionLocks /
- * b2MotionLocks, which do NOT exist in any released Box2D tag (v3.1.1 is the
- * newest upstream; the engine's build.sh pins a v3.2.0 that upstream never
- * published). Re-enabling means pinning a Box2D main-branch commit that has
- * that API and recording it — not just bumping the tag.
+ * WITH_PHYSICS=1 builds them in for real: Box2D and Box3D, both pinned by
+ * SHA (no released Box2D tag has the API physics.c calls, and Box3D has no
+ * releases at all), with host SIMD and the shared worker pool.
  */
 struct lua_State;
 
-void wcl_open_physics(struct lua_State *L) { (void)L; }
+/* Both openers must exist: runtime.c calls them unconditionally, and a
+ * cart that never touches physics should not drag Box2D and Box3D into
+ * the binary just to satisfy a symbol. */
+void wcl_open_physics(struct lua_State *L)   { (void)L; }
+void wcl_open_physics3d(struct lua_State *L) { (void)L; }
