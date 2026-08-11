@@ -30,6 +30,21 @@ Rendering is **bit-exact** against the wasm engine on all four games — see
 Parity below. Plan and milestone history:
 [`internal-wasmcart/PLAN.md`](../internal-wasmcart/PLAN.md).
 
+## Engine source
+
+The engine is compiled from `wasmcart-lua`, not vendored here. It is found in
+this order:
+
+1. `deps/wasmcart-lua` (the pinned submodule), if it contains
+   `runtime/render3d_gl.c`
+2. a sibling checkout at `../wasmcart-lua`, if it does
+3. otherwise the build stops and says the pin is stale
+
+The probe is `render3d_gl.c` rather than `runtime.c` deliberately: it is the
+newest source this build needs, so a pin that predates 3D rendering is
+rejected as too old instead of being selected and failing later on a missing
+file. Override with `cmake -DENGINE_REPO=/path/to/wasmcart-lua`.
+
 ## Try it (macOS)
 
 ```sh
