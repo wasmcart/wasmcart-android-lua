@@ -44,7 +44,12 @@ if not out.exists() or out.read_text() != new:
     out.write_text(new)
 PY
 
-emcc "$RT/runtime.c" "$RT/vorbis.c" "$RT/cartconf.c" "$RT/render2d_gl.c" \
+# render3d_gl.c must be here for the same reason it is in the native build:
+# render2d_gl.c calls into it, and a parity run is only meaningful if BOTH
+# sides are built from the same source set. Leaving it off one side would
+# compare two different engines and call the difference a port bug.
+emcc "$RT/runtime.c" "$RT/vorbis.c" "$RT/cartconf.c" \
+  "$RT/render2d_gl.c" "$RT/render3d_gl.c" \
   native/physics_stub.c "$OUT/vendor/liblua54.a" \
   -O2 -msimd128 -msse2 -DWC_USE_NET_PEER -DWCL_USE_GL -DWCL_ENABLE_GL2D \
   -I "$OUT/vendor/lua/src" -I "$WASMCART/include" -I "$RT" \

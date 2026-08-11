@@ -30,6 +30,15 @@ Rendering is **bit-exact** against the wasm engine on all four games — see
 Parity below. Plan and milestone history:
 [`internal-wasmcart/PLAN.md`](../internal-wasmcart/PLAN.md).
 
+Re-verified on an API 36 **emulator** after the engine gained 3D and Box3D:
+all four games build, install side by side, and play by touch at 55–60 fps
+with no fatals. Build for the emulator's own ABI rather than letting an
+arm64 APK run under binary translation:
+
+```sh
+WC_ABI=x86_64 ./build-game-apk.sh game.wasc
+```
+
 ## Engine source
 
 The engine is compiled from `wasmcart-lua`, not vendored here. It is found in
@@ -60,6 +69,34 @@ Flags: `--frames N` (exit after N), `--shot FILE` (PPM screenshot, fixed
 60 Hz step for reproducible goldens), `--drive N` (synthesize an A press
 every N frames), `--scale S` (shrink the window).
 
+## Build an APK
+
+Any host with the Android SDK + NDK — unlike the desktop harness above, this
+path is not macOS-specific.
+
+```sh
+./deps/fetch-deps.sh                              # SDL2 + Lua
+./build-game-apk.sh game.wasc [icon.png] [out.apk]
+```
+
+The cart IS the app: gradle reads the cart's manifest for the launcher label
+and derives a unique `applicationId` from it, so every game installs
+**alongside** the others rather than over them.
+
+Ships `arm64-v8a`. For an emulator, build its own ABI instead:
+
+```sh
+WC_ABI=x86_64 ./build-game-apk.sh game.wasc
+adb install -r out/<slug>.apk
+```
+
+An arm64 APK *will* run on an x86_64 emulator through libndk_translation,
+but under binary translation — so a frame rate measured that way means
+nothing, and a crash might belong to the translator rather than the app.
+
+Physics is off by default; `-DWITH_PHYSICS=ON` (see Parity) builds Box2D and
+Box3D in.
+
 ## Parity
 
 ```sh
@@ -67,10 +104,15 @@ every N frames), `--scale S` (shrink the window).
 ```
 
 Builds a wasm engine and a native engine from the SAME sources with the same
-feature set, packs each game against the wasm one, then drives both through
-identical scripted input (same seed, same fixed 60 Hz step) and compares the
-frames. Today all four dad games come out **bit-exact: 0.000% of pixels
-differ, max delta 0, over 300 frames.**
+feature set — including `render3d_gl.c`, and physics stubbed on both sides —
+packs each game against the wasm one, then drives both through identical
+scripted input (same seed, same fixed 60 Hz step) and compares the frames.
+Today all four dad games come out **bit-exact: 0.000% of pixels differ, max
+delta 0, over 300 frames.**
+
+Both sides must be built from the same source set or the comparison is
+meaningless: a file present on one side only would show up as a rendering
+difference and be read as a port bug.
 
 Comparing against whatever engine a cart happens to be packed with would make
 every difference ambiguous — engine drift, or port bug? Building both sides
@@ -110,7 +152,9 @@ asset tree to the engine it already contains. That is what keeps one
 artifact shipping to every platform.
 
 ```
-game.wasc ──(assets)──> native engine (runtime.c, render2d_gl.c, Lua 5.4.7)
+game.wasc ──(assets)──> native engine (runtime.c, Lua 5.4.7,
+                            │           render2d_gl.c + render3d_gl.c,
+                            │           optional Box2D + Box3D)
                             │  direct GLES3 / GL — no marshaling shim
                         native host (wc_host_native.c) ──> SDL2
 ```
