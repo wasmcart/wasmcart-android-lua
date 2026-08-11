@@ -67,6 +67,26 @@ NEON on arm64, AVX2 on x86_64. Default is off: no card game touches
 physics and the two libraries are the largest thing in the binary. See
 `native/physics_stub.c`.
 
+The Android build takes the same flag: `-DWITH_PHYSICS=ON`. Both libraries
+are pinned by SHA, and the SHAs are **read out of the engine's own
+`runtime/build.sh`** rather than repeated here — a different Box2D on
+Android would mean the same cart simulating differently on the phone than
+in the wasm build, which is the kind of divergence nobody thinks to look
+for until a save desyncs.
+
+## 3D
+
+The engine's 3D pipeline (`render3d_gl.c`) is built in unconditionally and
+needs nothing extra on Android: it targets GLES3, which is what the phone
+has natively. On the desktop harness the same calls go through
+`tools/gles_shim.c`; the shim is a GLSL-dialect translation for macOS's
+OpenGL 3.3 and is **not** part of the Android build.
+
+That covers the depth buffer, GPU render targets (float / depth /
+cube / array / volume formats), multiple render targets, instancing,
+colour masking and generic vertex formats — so a 3D cart, including one
+built on g3d or 3DreamEngine, renders the same here as under wasm.
+
 ## How it works
 
 A `.wasc` is a zip: `manifest.json`, `main.wasm`, and the asset tree. The

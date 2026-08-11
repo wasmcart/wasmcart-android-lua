@@ -58,30 +58,112 @@ target_include_directories(lua54 PRIVATE "${RT}")
 # stdout/stderr hooks resolve to wc_log instead of stdio.
 target_compile_options(lua54 PRIVATE -include "${RT}/cartconf.h")
 
+# ─── Box2D + Box3D (WITH_PHYSICS) ─────────────────────────────────────────
+#
+# Off by default, matching tools/build-native-macos.sh: no card game touches
+# physics, and the two libraries are the largest thing in the binary. A cart
+# that DOES use love.physics or b3 needs -DWITH_PHYSICS=ON.
+#
+# Both are pinned by SHA rather than tag, exactly as the engine's own
+# build.sh pins them: no released Box2D has the API physics.c calls, and
+# Box3D has no releases at all. The SHAs are read FROM that build.sh so the
+# native build cannot silently drift from the wasm one -- a different Box2D
+# here would mean the same cart simulating differently on Android, which is
+# the kind of divergence nobody would think to look for.
+option(WITH_PHYSICS "Build Box2D + Box3D into the engine" OFF)
+
+if(WITH_PHYSICS)
+    file(READ "${ENGINE_REPO}/runtime/build.sh" _bs)
+    string(REGEX MATCH "BOX2D_SHA=([0-9a-f]+)" _m2 "${_bs}")
+    set(BOX2D_SHA "${CMAKE_MATCH_1}")
+    string(REGEX MATCH "BOX3D_SHA=([0-9a-f]+)" _m3 "${_bs}")
+    set(BOX3D_SHA "${CMAKE_MATCH_1}")
+    if(NOT BOX2D_SHA OR NOT BOX3D_SHA)
+        message(FATAL_ERROR
+            "could not read BOX2D_SHA/BOX3D_SHA out of ${ENGINE_REPO}/runtime/build.sh")
+    endif()
+
+    include(FetchContent)
+    FetchContent_Declare(box2d_src
+        GIT_REPOSITORY https://github.com/erincatto/box2d.git
+        GIT_TAG        "${BOX2D_SHA}")
+    FetchContent_Declare(box3d_src
+        GIT_REPOSITORY https://github.com/erincatto/box3d.git
+        GIT_TAG        "${BOX3D_SHA}")
+    FetchContent_Populate(box2d_src)
+    FetchContent_Populate(box3d_src)
+
+    file(GLOB BOX2D_SRC "${box2d_src_SOURCE_DIR}/src/*.c")
+    file(GLOB BOX3D_SRC "${box3d_src_SOURCE_DIR}/src/*.c")
+    add_library(box2d STATIC ${BOX2D_SRC})
+    target_include_directories(box2d PUBLIC
+        "${box2d_src_SOURCE_DIR}/include" PRIVATE "${box2d_src_SOURCE_DIR}/src")
+    add_library(box3d STATIC ${BOX3D_SRC})
+    target_include_directories(box3d PUBLIC
+        "${box3d_src_SOURCE_DIR}/include" PRIVATE "${box3d_src_SOURCE_DIR}/src")
+
+    # Both libraries pick their own SIMD kernels from the CPU macros; this
+    # only has to let the compiler emit them. arm64 always has NEON, so
+    # nothing extra is needed for the shipping ABI.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+        target_compile_options(box2d PRIVATE -mavx2)
+        target_compile_options(box3d PRIVATE -mavx2)
+        set(PHYS_SIMD "avx2")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+        set(PHYS_SIMD "neon")
+    else()
+        set(PHYS_SIMD "none")
+    endif()
+endif()
+
 # ─── libmain.so: engine + native host + SDL entry point ───────────────────
 #
 # Note what is absent: no libnode, no V8, no gl_imports shim. render2d_gl.c
-# calls GLES3 directly (wasmcart.h's _GL_IMPORT is a no-op off-wasm), so the
-# engine links against the system GLESv3 like any native program.
+# and render3d_gl.c call GLES3 directly (wasmcart.h's _GL_IMPORT is a no-op
+# off-wasm), so the engine links against the system GLESv3 like any native
+# program.
+
+set(ENGINE_SRC
+    "${RT}/runtime.c"
+    "${RT}/vorbis.c"
+    "${RT}/cartconf.c"
+    "${RT}/render2d_gl.c"
+    # The 3D pipeline: depth buffer, GPU render targets (float/depth/cube/
+    # array/volume), MRT, instancing, generic vertex formats. Omitting it
+    # would not fail to link -- render2d_gl.c calls into it, so a missing
+    # file is a link error -- but it is what makes a 3D cart render at all.
+    "${RT}/render3d_gl.c"
+)
+if(WITH_PHYSICS)
+    list(APPEND ENGINE_SRC
+        "${RT}/physics.c"       # Box2D, bound as the Lua global `b2`
+        "${RT}/physics3d.c"     # Box3D, bound as `b3`
+        "${RT}/wc_taskpool.c")  # the shared worker pool both step on
+else()
+    # runtime.c calls wcl_open_physics()/wcl_open_physics3d() unconditionally,
+    # so the symbols must exist even when the libraries do not.
+    list(APPEND ENGINE_SRC physics_stub.c)
+endif()
 
 add_library(main SHARED
     android_main.c
     wc_host_native.c
     zip_assets.c
     wc_shell.c
-    physics_stub.c          # see the file: no released Box2D has physics.c's API
-    "${RT}/runtime.c"
-    "${RT}/vorbis.c"
-    "${RT}/cartconf.c"
-    "${RT}/render2d_gl.c"
+    ${ENGINE_SRC}
 )
 
 target_compile_definitions(main PRIVATE
     WC_NATIVE_HOST          # real host symbols, real pointers (wc_native.h)
     WCL_USE_GL
-    WCL_ENABLE_GL2D
+    WCL_ENABLE_GL2D         # also gates render3d_gl.c: 3D is GL-only
     WC_USE_NET_PEER         # runtime.c references wc_peer_*; host stubs them
 )
+if(WITH_PHYSICS)
+    # The engine reports this string through b2.simd/b3.simd, so a cart can
+    # say which kernels it actually got rather than assume.
+    target_compile_definitions(main PRIVATE WC_PHYSICS_SIMD="${PHYS_SIMD}")
+endif()
 
 target_include_directories(main PRIVATE
     "${RT}"
@@ -97,3 +179,6 @@ target_link_libraries(main PRIVATE
     z                       # zip_assets.c inflates cart entries
     m log android
 )
+if(WITH_PHYSICS)
+    target_link_libraries(main PRIVATE box2d box3d)
+endif()
