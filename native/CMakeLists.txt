@@ -7,14 +7,49 @@ set(DEPS "${CMAKE_CURRENT_SOURCE_DIR}/../deps")
 
 # Engine sources live in wasmcart-lua and are compiled here, not vendored:
 # one home for the engine, two targets (wasm + native).
+#
+# The probe is render3d_gl.c, not runtime.c, and that is deliberate: it is
+# the NEWEST engine source this build needs, so a submodule pinned to a
+# commit that predates it is rejected as too old instead of being selected
+# and failing later on a missing file. runtime.c has existed since the
+# first commit and can never tell the two apart.
+#
+# A sibling checkout is the fallback, which is what makes a working tree
+# usable while a pin is still catching up.
 if(NOT DEFINED ENGINE_REPO)
-    if(EXISTS "${DEPS}/wasmcart-lua/runtime/runtime.c")
+    if(EXISTS "${DEPS}/wasmcart-lua/runtime/render3d_gl.c")
         set(ENGINE_REPO "${DEPS}/wasmcart-lua")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../wasmcart-lua/runtime/render3d_gl.c")
+        set(ENGINE_REPO "${CMAKE_CURRENT_SOURCE_DIR}/../../wasmcart-lua")
+        message(STATUS
+            "engine: using the sibling checkout at ${ENGINE_REPO}\n"
+            "   (deps/wasmcart-lua is absent or predates render3d_gl.c)")
+    elseif(EXISTS "${DEPS}/wasmcart-lua/runtime/runtime.c")
+        # A submodule IS present but is too old, and there is no sibling to
+        # fall back to. Name the missing file and the way out, rather than
+        # failing further down on a source path the reader would have to
+        # reverse-engineer into "the pin is stale".
+        message(FATAL_ERROR
+            "deps/wasmcart-lua is pinned to an engine without "
+            "runtime/render3d_gl.c.\n"
+            "   That commit predates 3D rendering, so this build cannot use it.\n"
+            "   Fix: git submodule update --remote deps/wasmcart-lua\n"
+            "   Or:  cmake -DENGINE_REPO=/path/to/wasmcart-lua")
     else()
         set(ENGINE_REPO "${CMAKE_CURRENT_SOURCE_DIR}/../../wasmcart-lua")
     endif()
 endif()
 set(RT "${ENGINE_REPO}/runtime")
+
+# One more guard for the -DENGINE_REPO case: an explicitly pointed-at repo
+# that lacks the 3D source gets the same named error as a stale pin, not a
+# missing-source-file error 100 lines later.
+if(EXISTS "${RT}/runtime.c" AND NOT EXISTS "${RT}/render3d_gl.c")
+    message(FATAL_ERROR
+        "the engine at ${ENGINE_REPO} has no runtime/render3d_gl.c.\n"
+        "   That source is required: it is the 3D pipeline, and render2d_gl.c\n"
+        "   calls into it. Update the engine checkout.")
+endif()
 
 if(NOT DEFINED WASMCART_REPO)
     if(EXISTS "${DEPS}/wasmcart/include/wc_cart.h")
