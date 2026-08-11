@@ -59,9 +59,11 @@ Comparing against whatever engine a cart happens to be packed with would make
 every difference ambiguous — engine drift, or port bug? Building both sides
 from one source removes that question.
 
-`WITH_PHYSICS=1` builds Box2D in. Default is off — see
-`native/physics_stub.c` for why (the engine's `physics.c` calls a Box2D API
-that exists in no released upstream tag).
+`WITH_PHYSICS=1` builds Box2D **and** Box3D in, giving carts the `b2` and
+`b3` Lua globals with real worker threads (`wc_taskpool`) and host SIMD —
+NEON on arm64, AVX2 on x86_64. Default is off: no card game touches
+physics and the two libraries are the largest thing in the binary. See
+`native/physics_stub.c`.
 
 ## How it works
 
