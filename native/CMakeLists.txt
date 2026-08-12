@@ -63,6 +63,47 @@ if(NOT EXISTS "${RT}/runtime.c")
     message(FATAL_ERROR "engine sources not found at ${RT}\n"
         "Set -DENGINE_REPO=/path/to/wasmcart-lua (or add the submodule).")
 endif()
+
+# ─── prelude.inc: GENERATED, and not by us until now ────────────────────
+#
+# runtime.c does #include "prelude.inc" -- the Lua prelude (plus the ffi
+# shim) embedded as a C byte array. It is produced by the ENGINE's own
+# emscripten build script and is GITIGNORED, so a fresh checkout of
+# wasmcart-lua does not contain it and never will.
+#
+# Nothing here generated it, so an Android build against a clean engine
+# checkout died with "fatal error: 'prelude.inc' file not found" partway
+# through the native compile. It only ever worked because a previously-run
+# wasm build had left the file lying around in the submodule; cleaning it
+# broke every Android build, on any game.
+#
+# Generate it at configure time from the same two sources, in the same
+# order and format as runtime/build.sh, writing into the BUILD tree so a
+# read-only or pristine engine checkout is never modified.
+set(PRELUDE_INC "${CMAKE_CURRENT_BINARY_DIR}/generated/prelude.inc")
+if(NOT EXISTS "${RT}/prelude.lua" OR NOT EXISTS "${RT}/ffi.lua")
+    message(FATAL_ERROR
+        "engine at ${ENGINE_REPO} is missing runtime/prelude.lua or runtime/ffi.lua;\n"
+        "   prelude.inc cannot be generated. Update the engine checkout.")
+endif()
+file(READ "${RT}/prelude.lua" _prelude HEX)
+file(READ "${RT}/ffi.lua"     _ffi     HEX)
+# The shim wrapper runtime/build.sh puts around ffi.lua, byte for byte.
+string(HEX "
+-- ---- embedded module: ffi (see runtime/ffi.lua) ----
+package.loaded['ffi'] = (function()
+" _shim_head)
+string(HEX "
+end)()
+" _shim_tail)
+set(_blob "${_prelude}${_shim_head}${_ffi}${_shim_tail}")
+string(LENGTH "${_blob}" _hexlen)
+math(EXPR _len "${_hexlen} / 2")
+string(REGEX REPLACE "(..)" "0x\\1," _bytes "${_blob}")
+file(WRITE "${PRELUDE_INC}"
+    "static const unsigned char WCL_PRELUDE[] = {${_bytes}};\n"
+    "static const unsigned int WCL_PRELUDE_LEN = ${_len};\n")
+message(STATUS "generated prelude.inc (${_len} bytes) -> ${PRELUDE_INC}")
 if(NOT EXISTS "${DEPS}/lua/src/lua.h")
     message(FATAL_ERROR "Lua not found. Run deps/fetch-deps.sh")
 endif()
@@ -201,6 +242,14 @@ if(WITH_PHYSICS)
 endif()
 
 target_include_directories(main PRIVATE
+    # BEFORE ${RT} on purpose. prelude.inc is generated into the build tree
+    # (see above), but a checkout that has ALSO run the wasm build has its
+    # own stale copy sitting in runtime/. Putting the generated directory
+    # first means the build always compiles the prelude it just derived from
+    # prelude.lua, rather than whatever an unrelated emscripten run left
+    # behind -- which would silently ship a different prelude than the
+    # sources say.
+    "${CMAKE_CURRENT_BINARY_DIR}/generated"
     "${RT}"
     "${DEPS}/lua/src"
     "${WASMCART_REPO}/include"
