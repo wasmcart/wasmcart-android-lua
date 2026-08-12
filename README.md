@@ -30,6 +30,12 @@ Rendering is **bit-exact** against the wasm engine on all four games — see
 Parity below. Plan and milestone history:
 [`internal-wasmcart/PLAN.md`](../internal-wasmcart/PLAN.md).
 
+> **Parity is verified on macOS only.** `tools/parity.sh` builds a native
+> engine through `build-native-macos.sh`, so the gate cannot run on a Linux
+> box. The claim above therefore covers the engine as of the last macOS run,
+> not necessarily the current pin — re-run the gate on a Mac after a
+> wasmcart-lua bump that touches the renderer.
+
 Re-verified on an API 36 **emulator** after the engine gained 3D and Box3D:
 all four games build, install side by side, and play by touch at 55–60 fps
 with no fatals. Build for the emulator's own ABI rather than letting an
@@ -53,6 +59,27 @@ The probe is `render3d_gl.c` rather than `runtime.c` deliberately: it is the
 newest source this build needs, so a pin that predates 3D rendering is
 rejected as too old instead of being selected and failing later on a missing
 file. Override with `cmake -DENGINE_REPO=/path/to/wasmcart-lua`.
+
+### prelude.inc is generated here
+
+`runtime.c` includes `prelude.inc` — the Lua prelude plus the ffi shim,
+embedded as a C byte array. In `wasmcart-lua` that file is produced by the
+**emscripten** build and is gitignored, so a fresh checkout never contains
+it.
+
+CMake therefore generates it at configure time from `prelude.lua` +
+`ffi.lua`, in the same order and format, writing into the *build* tree so a
+pristine or read-only engine checkout is never modified. The generated
+directory goes **before** the engine's `runtime/` on the include path: a
+checkout that has also run the wasm build has its own stale copy there, and
+compiling that would silently ship a prelude that does not match the
+sources.
+
+Before this existed, an Android build against a clean checkout died partway
+through the native compile with `fatal error: 'prelude.inc' file not found`.
+It only ever worked because a previous wasm build had left a copy lying
+around — so it broke for every game at once the moment that was cleaned, and
+would have broken CI on any cold cache.
 
 ## Try it (macOS)
 
