@@ -37,10 +37,23 @@ cp "$CART" "$HERE/app/src/main/assets/cart.wasc"
 
 if [ -n "$ICON" ]; then
     [ -f "$ICON" ] || { echo "no such icon: $ICON" >&2; exit 1; }
+    # ImageMagick 7 renamed the tool to `magick`; 6 only has `convert`,
+    # and that is what Ubuntu's imagemagick package still installs. This
+    # hardcoded `magick` and so died with "command not found" on a GitHub
+    # runner that HAD ImageMagick installed -- just the older one.
+    if command -v magick >/dev/null 2>&1; then
+        IM=(magick)
+    elif command -v convert >/dev/null 2>&1; then
+        IM=(convert)
+    else
+        echo "need ImageMagick (magick or convert) to resize $ICON" >&2
+        echo "  apt-get install imagemagick   /   brew install imagemagick" >&2
+        exit 1
+    fi
     for spec in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
         d="${spec%%:*}"; px="${spec##*:}"
         mkdir -p "$HERE/app/src/main/res/mipmap-$d"
-        magick "$ICON" -resize "${px}x${px}" \
+        "${IM[@]}" "$ICON" -resize "${px}x${px}" \
             "$HERE/app/src/main/res/mipmap-$d/ic_launcher_foreground.png"
     done
 fi
